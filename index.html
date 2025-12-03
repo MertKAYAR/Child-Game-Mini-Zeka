@@ -4,8 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Mini Zeka Kulübü</title>
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Babel for in-browser compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+
     <style>
       body {
         font-family: 'Fredoka', sans-serif;
@@ -22,21 +30,818 @@
       .animate-float {
         animation: float 3s ease-in-out infinite;
       }
+      @keyframes bounce-short {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-25%); }
+      }
+      .animate-bounce-short {
+        animation: bounce-short 1s ease-in-out infinite;
+      }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react/": "https://esm.sh/react@18.2.0/",
-    "react-dom": "https://esm.sh/react-dom@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "lucide-react": "https://esm.sh/lucide-react@0.300.0?deps=react@18.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
-  }
-}
-</script>
-</head>
+
+    <!-- Import Map -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.294.0?deps=react@18.2.0"
+      }
+    }
+    </script>
+  </head>
   <body>
     <div id="root"></div>
+
+    <!-- Removed 'env' from presets to prevent Babel from converting imports to require() -->
+    <script type="text/babel" data-type="module" data-presets="react">
+      import React, { useState, useEffect, useRef } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { 
+        Gamepad2, BrainCircuit, Palette, Tv, 
+        ArrowRight, HelpCircle, Trophy, Star, 
+        RefreshCw, Play, ArrowLeft, BookOpen, 
+        Pause, X, Check, Home 
+      } from 'lucide-react';
+
+      // --- CONSTANTS ---
+      const GameScreen = {
+        MENU: 'MENU',
+        GAME_CIPHER: 'GAME_CIPHER',
+        GAME_MEMORY: 'GAME_MEMORY',
+        GAME_STORY: 'GAME_STORY',
+        REWARDS: 'REWARDS'
+      };
+
+      // --- AUDIO SERVICE ---
+      class AudioService {
+        constructor() {
+          this.synth = null;
+          this.audioCtx = null;
+          this.voice = null;
+          this.currentUtterance = null;
+
+          try {
+            if (typeof window !== 'undefined' && window.speechSynthesis) {
+              this.synth = window.speechSynthesis;
+              if (window.speechSynthesis.onvoiceschanged !== undefined) {
+                window.speechSynthesis.onvoiceschanged = this.loadVoice.bind(this);
+              }
+              this.loadVoice();
+            }
+            
+            if (typeof window !== 'undefined') {
+              const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+              if (AudioContextClass) {
+                this.audioCtx = new AudioContextClass();
+              }
+            }
+          } catch (e) {
+            console.warn('Audio initialization failed', e);
+          }
+        }
+
+        loadVoice() {
+          if (!this.synth) return;
+          try {
+            const voices = this.synth.getVoices();
+            this.voice = voices.find(v => v.lang.includes('tr')) || voices[0] || null;
+          } catch(e) { console.warn('Voice load failed', e); }
+        }
+
+        speak(text) {
+          if (!this.synth) return;
+          try {
+            if (this.synth.speaking) {
+              this.synth.cancel();
+            }
+            this.currentUtterance = this.createUtterance(text);
+            if (this.currentUtterance) {
+              this.currentUtterance.onend = () => {
+                this.currentUtterance = null;
+              };
+              this.synth.speak(this.currentUtterance);
+            }
+          } catch (e) { console.warn('Speak failed', e); }
+        }
+
+        speakWithCallback(text, onEnd) {
+          if (!this.synth) {
+            onEnd();
+            return;
+          }
+          try {
+            if (this.synth.speaking) {
+              this.synth.cancel();
+            }
+            this.currentUtterance = this.createUtterance(text);
+            
+            if (this.currentUtterance) {
+              this.currentUtterance.onend = () => {
+                this.currentUtterance = null;
+                onEnd();
+              };
+
+              this.currentUtterance.onerror = (event) => {
+                this.currentUtterance = null;
+                if (event.error === 'canceled' || event.error === 'interrupted') {
+                  return;
+                }
+                onEnd(); 
+              };
+
+              this.synth.speak(this.currentUtterance);
+            } else {
+              onEnd();
+            }
+          } catch (e) {
+            console.warn('SpeakWithCallback failed', e);
+            onEnd();
+          }
+        }
+
+        createUtterance(text) {
+          if (!this.synth) return null;
+          if (!this.voice) this.loadVoice();
+
+          const utterance = new SpeechSynthesisUtterance(text);
+          if (this.voice) {
+            utterance.voice = this.voice;
+          }
+          utterance.lang = 'tr-TR';
+          utterance.rate = 0.9; 
+          utterance.pitch = 1.1;
+          return utterance;
+        }
+
+        cancelSpeech() {
+          if (this.synth) {
+            this.synth.cancel();
+            this.currentUtterance = null;
+          }
+        }
+
+        resumeContext() {
+          try {
+            if (this.audioCtx && this.audioCtx.state === 'suspended') {
+              this.audioCtx.resume();
+            }
+          } catch (e) {}
+        }
+
+        createOscillator(freq, type, duration, startTime = 0) {
+          if (!this.audioCtx) return;
+          try {
+            const osc = this.audioCtx.createOscillator();
+            const gainNode = this.audioCtx.createGain();
+
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, this.audioCtx.currentTime + startTime);
+            
+            gainNode.gain.setValueAtTime(0.1, this.audioCtx.currentTime + startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + startTime + duration);
+
+            osc.connect(gainNode);
+            gainNode.connect(this.audioCtx.destination);
+
+            osc.start(this.audioCtx.currentTime + startTime);
+            osc.stop(this.audioCtx.currentTime + startTime + duration);
+          } catch (e) {}
+        }
+
+        playNote(note) {
+          this.resumeContext();
+          const notes = {
+            'C': 261.63, 'D': 293.66, 'E': 329.63, 'F': 349.23, 'G': 392.00, 'A': 440.00, 'B': 493.88
+          };
+          const freq = notes[note];
+          if (freq) this.createOscillator(freq, 'triangle', 0.5, 0);
+        }
+
+        playCorrect() {
+          this.resumeContext();
+          this.createOscillator(523.25, 'sine', 0.3, 0);   
+          this.createOscillator(659.25, 'sine', 0.3, 0.1); 
+          this.createOscillator(783.99, 'sine', 0.4, 0.2); 
+          this.createOscillator(1046.50, 'sine', 0.5, 0.3); 
+        }
+
+        playWrong() {
+          this.resumeContext();
+          this.createOscillator(300, 'sawtooth', 0.4, 0);
+          this.createOscillator(200, 'sawtooth', 0.4, 0.2);
+        }
+
+        playClick() {
+          this.resumeContext();
+          this.createOscillator(800, 'triangle', 0.05, 0);
+        }
+
+        playFlip() {
+          this.resumeContext();
+          this.createOscillator(400, 'sine', 0.1, 0);
+        }
+
+        playFanfare() {
+          this.resumeContext();
+          [523, 659, 784, 1046, 784, 1046].forEach((freq, i) => {
+              this.createOscillator(freq, 'square', 0.2, i * 0.15);
+          });
+        }
+      }
+
+      const audioService = new AudioService();
+
+      // --- COMPONENTS ---
+
+      // Error Boundary to prevent white screen
+      class ErrorBoundary extends React.Component {
+        constructor(props) {
+          super(props);
+          this.state = { hasError: false };
+        }
+        static getDerivedStateFromError(error) {
+          return { hasError: true };
+        }
+        componentDidCatch(error, errorInfo) {
+          console.error("Game Error:", error, errorInfo);
+        }
+        render() {
+          if (this.state.hasError) {
+            return (
+              <div className="flex flex-col items-center justify-center h-screen bg-pink-50 p-4 text-center">
+                <div className="text-4xl mb-4">😔</div>
+                <h2 className="text-2xl font-bold text-gray-700">Bir şeyler ters gitti.</h2>
+                <button onClick={() => window.location.reload()} className="mt-4 bg-pink-500 text-white px-6 py-3 rounded-2xl font-bold shadow-lg">
+                   Tekrar Başlat
+                </button>
+              </div>
+            );
+          }
+          return this.props.children;
+        }
+      }
+
+      // 1. MAIN MENU
+      const MainMenu = ({ onNavigate, stars }) => {
+        useEffect(() => {
+          audioService.speak("Oynamak istediğin oyunu seç!");
+        }, []);
+
+        const handleNav = (screen, text) => {
+          audioService.speak(text);
+          onNavigate(screen);
+        };
+
+        return (
+          <div className="flex flex-col items-center justify-center h-full w-full p-4 gap-6">
+            <div className="bg-white/90 p-6 rounded-[2rem] shadow-xl border-4 border-pink-200 w-full max-w-md text-center transform hover:scale-105 transition-transform duration-300">
+              <h1 className="text-4xl font-black text-pink-500 mb-2 drop-shadow-sm">Mini Zeka</h1>
+              <div className="inline-flex items-center bg-yellow-100 px-6 py-2 rounded-full border-2 border-yellow-300">
+                <span className="text-3xl mr-2">⭐️</span>
+                <span className="text-3xl font-bold text-yellow-600">{stars}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 w-full max-w-lg">
+              <button onClick={() => handleNav(GameScreen.GAME_CIPHER, "Şifre Çözücü")} className="aspect-square bg-blue-100 rounded-3xl border-b-8 border-blue-400 active:border-b-0 active:translate-y-2 transition-all flex flex-col items-center justify-center p-4 hover:bg-blue-200">
+                <div className="bg-white p-4 rounded-full mb-2 shadow-sm"><BrainCircuit size={48} className="text-blue-500" /></div>
+                <span className="text-xl font-bold text-blue-600">Şifre Çöz</span>
+              </button>
+
+              <button onClick={() => handleNav(GameScreen.GAME_MEMORY, "Hafıza Kartları")} className="aspect-square bg-green-100 rounded-3xl border-b-8 border-green-400 active:border-b-0 active:translate-y-2 transition-all flex flex-col items-center justify-center p-4 hover:bg-green-200">
+                <div className="bg-white p-4 rounded-full mb-2 shadow-sm"><Gamepad2 size={48} className="text-green-500" /></div>
+                <span className="text-xl font-bold text-green-600">Hafıza</span>
+              </button>
+
+              <button onClick={() => handleNav(GameScreen.REWARDS, "Boyama Kitabı")} className="aspect-square bg-purple-100 rounded-3xl border-b-8 border-purple-400 active:border-b-0 active:translate-y-2 transition-all flex flex-col items-center justify-center p-4 hover:bg-purple-200">
+                <div className="bg-white p-4 rounded-full mb-2 shadow-sm"><Palette size={48} className="text-purple-500" /></div>
+                <span className="text-xl font-bold text-purple-600">Boyama</span>
+              </button>
+
+              <button onClick={() => handleNav(GameScreen.GAME_STORY, "Hikaye Zamanı")} className="aspect-square bg-orange-100 rounded-3xl border-b-8 border-orange-400 active:border-b-0 active:translate-y-2 transition-all flex flex-col items-center justify-center p-4 hover:bg-orange-200">
+                <div className="bg-white p-4 rounded-full mb-2 shadow-sm"><Tv size={48} className="text-orange-500" /></div>
+                <span className="text-xl font-bold text-orange-600">Hikaye</span>
+              </button>
+            </div>
+          </div>
+        );
+      };
+
+      // 2. GAME CIPHER
+      const ALL_ANIMALS = ['🦁', '🐸', '🐱', '🐼', '🦊', '🐨', '🐷', '🐵'];
+      const SYMBOLS = [
+        { id: 'star', char: '★', color: 'text-yellow-500', bg: 'bg-yellow-100', border: 'border-yellow-300' },
+        { id: 'square', char: '■', color: 'text-red-500', bg: 'bg-red-100', border: 'border-red-300' },
+        { id: 'circle', char: '●', color: 'text-blue-500', bg: 'bg-blue-100', border: 'border-blue-300' },
+        { id: 'triangle', char: '▲', color: 'text-green-500', bg: 'bg-green-100', border: 'border-green-300' },
+        { id: 'diamond', char: '◆', color: 'text-purple-500', bg: 'bg-purple-100', border: 'border-purple-300' },
+        { id: 'heart', char: '♥', color: 'text-pink-500', bg: 'bg-pink-100', border: 'border-pink-300' },
+      ];
+      const CIPHER_LEVEL_CONFIG = {
+        1: { poolSize: 2, clueRows: 1, questionLen: 2, iconSize: 'text-5xl', boxSize: 'w-20 h-20' },
+        2: { poolSize: 3, clueRows: 2, questionLen: 3, iconSize: 'text-4xl', boxSize: 'w-16 h-16' },
+        3: { poolSize: 4, clueRows: 3, questionLen: 3, iconSize: 'text-3xl', boxSize: 'w-14 h-14' },
+      };
+
+      const GameCipher = ({ onWin }) => {
+        const [level, setLevel] = useState(1);
+        const [streak, setStreak] = useState(0);
+        const [clues, setClues] = useState([]);
+        const [question, setQuestion] = useState([]);
+        const [options, setOptions] = useState([]);
+        const [correctOptionIndex, setCorrectOptionIndex] = useState(0);
+        const [feedback, setFeedback] = useState('none');
+
+        const generateLevel = () => {
+          setFeedback('none');
+          const config = CIPHER_LEVEL_CONFIG[level];
+          const activeAnimals = [...ALL_ANIMALS].sort(() => 0.5 - Math.random()).slice(0, config.poolSize);
+          const activeSymbols = [...SYMBOLS].sort(() => 0.5 - Math.random()).slice(0, config.poolSize);
+          const dictionary = {};
+          activeAnimals.forEach((anim, index) => { dictionary[anim] = activeSymbols[index]; });
+
+          let animalsToReveal = [...activeAnimals].sort(() => 0.5 - Math.random());
+          const generatedClues = [];
+          for (let i = 0; i < config.clueRows; i++) {
+              const rowAnimals = [];
+              for (let k = 0; k < 2; k++) {
+                  if (animalsToReveal.length > 0) {
+                      rowAnimals.push(animalsToReveal.pop());
+                  } else {
+                      rowAnimals.push(activeAnimals[Math.floor(Math.random() * activeAnimals.length)]);
+                  }
+              }
+              generatedClues.push({ animals: rowAnimals, symbols: rowAnimals.map(a => dictionary[a]) });
+          }
+          setClues(generatedClues);
+
+          const qAnimals = [];
+          for(let i=0; i < config.questionLen; i++) qAnimals.push(activeAnimals[Math.floor(Math.random() * activeAnimals.length)]);
+          setQuestion(qAnimals);
+          
+          const correctAns = qAnimals.map(a => dictionary[a]);
+          const uniqueOptions = new Set();
+          const finalOptions = [];
+          const getOptionKey = (opt) => JSON.stringify(opt.map(s => s.id));
+          
+          finalOptions.push(correctAns);
+          uniqueOptions.add(getOptionKey(correctAns));
+
+          let safetyLoop = 0;
+          while (finalOptions.length < 3 && safetyLoop < 100) {
+              safetyLoop++;
+              let candidate = [];
+              if (finalOptions.length === 1) {
+                   candidate = [...correctAns].sort(() => 0.5 - Math.random());
+              } else {
+                   for(let i=0; i < config.questionLen; i++) candidate.push(activeSymbols[Math.floor(Math.random() * activeSymbols.length)]);
+              }
+              const key = getOptionKey(candidate);
+              if (!uniqueOptions.has(key)) {
+                  uniqueOptions.add(key);
+                  finalOptions.push(candidate);
+              }
+          }
+
+          const shuffledOpts = finalOptions
+              .map(value => ({ value, sort: Math.random() }))
+              .sort((a, b) => a.sort - b.sort)
+              .map(({ value }) => value);
+
+          setOptions(shuffledOpts);
+          setCorrectOptionIndex(shuffledOpts.findIndex(o => getOptionKey(o) === getOptionKey(correctAns)));
+
+          if (streak === 0 && level === 1) audioService.speak("Kutulara bak. Hangi hayvan, hangi şekil? Şifreyi çöz.");
+        };
+
+        useEffect(() => { generateLevel(); }, [level]);
+
+        const handleSelect = (index) => {
+          if (feedback !== 'none') return;
+          if (index === correctOptionIndex) {
+            setFeedback('success');
+            audioService.playCorrect();
+            const newStreak = streak + 1;
+            setStreak(newStreak);
+            if (newStreak >= 2 && level < 3) {
+                audioService.speak("Harika! Zorlaşıyor!");
+                setTimeout(() => setLevel(prev => prev + 1), 1500);
+                setStreak(0);
+            } else {
+                audioService.speak("Doğru bildin!");
+                onWin();
+                setTimeout(generateLevel, 2500);
+            }
+          } else {
+            setFeedback('error');
+            audioService.playWrong();
+            audioService.speak("Yanlış oldu. İpuçlarına dikkat et.");
+            setStreak(0);
+            setTimeout(() => setFeedback('none'), 1500);
+          }
+        };
+
+        const config = CIPHER_LEVEL_CONFIG[level];
+        return (
+          <div className="flex flex-col h-full w-full max-w-2xl mx-auto gap-2 md:gap-4">
+            <div className="flex justify-between items-center px-4">
+              <div className="flex items-center gap-2 bg-indigo-100 px-3 py-1 rounded-full text-indigo-700">
+                  <Trophy size={16} /><span className="font-bold text-sm">Seviye {level}</span>
+              </div>
+              <div className="text-xs text-gray-400 font-bold uppercase tracking-widest">{level === 1 ? 'Başlangıç' : level === 2 ? 'Orta' : 'Zor'}</div>
+            </div>
+
+            <div className="bg-white/90 rounded-3xl p-3 shadow-sm border-2 border-indigo-100 flex-shrink-0 transition-all">
+              <div className="flex items-center justify-center gap-2 mb-2 text-indigo-400">
+                 <HelpCircle size={18} /><span className="font-bold text-xs tracking-widest uppercase">İPUÇLARI (Sözlük)</span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {clues.map((clue, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-indigo-50/50 rounded-xl p-2 px-4 border border-indigo-100">
+                    <div className="flex gap-2">{clue.animals.map((a, i) => <div key={i} className={`${config.iconSize} filter drop-shadow-sm animate-pulse`} style={{animationDuration: '3s'}}>{a}</div>)}</div>
+                    <ArrowRight className="text-indigo-300 w-6 h-6" />
+                    <div className="flex gap-2">{clue.symbols.map((s, i) => <div key={i} className={`${config.boxSize} md:w-12 md:h-12 rounded-lg border-b-4 flex items-center justify-center text-2xl ${s.bg} ${s.border} ${s.color}`}>{s.char}</div>)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl p-4 shadow-lg border-4 border-indigo-200 flex flex-col items-center justify-center flex-grow transition-all">
+               <div className="flex gap-3 mb-4">
+                  {question.map((animal, i) => (
+                      <div key={i} className="flex flex-col items-center gap-1">
+                          <div className={`${config.boxSize} bg-gray-50 rounded-2xl border-2 border-gray-200 flex items-center justify-center ${config.iconSize} shadow-sm`}>{animal}</div>
+                          <ArrowRight className="rotate-90 text-gray-300 w-5 h-5" />
+                      </div>
+                  ))}
+               </div>
+               <div className="flex gap-3">
+                  {question.map((_, i) => <div key={i} className={`${config.boxSize} rounded-xl border-4 border-dashed border-gray-300 flex items-center justify-center text-gray-300 font-bold bg-gray-50`}>?</div>)}
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 pb-2">
+              {options.map((opt, idx) => (
+                <button key={idx} onClick={() => handleSelect(idx)} className={`h-16 w-full rounded-2xl border-b-8 flex items-center justify-center gap-4 transition-all active:border-b-0 active:translate-y-2 ${feedback === 'success' && idx === correctOptionIndex ? 'bg-green-100 border-green-500 ring-4 ring-green-300 scale-105' : feedback === 'error' && idx === correctOptionIndex ? 'bg-red-50 border-red-200' : 'bg-white border-blue-300 hover:bg-blue-50'} ${feedback === 'error' && idx !== correctOptionIndex ? 'opacity-40' : ''}`}>
+                  {opt.map((s, i) => <div key={i} className={`text-3xl ${s.color} drop-shadow-sm`}>{s.char}</div>)}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      };
+
+      // 3. GAME MEMORY
+      const MEMORY_CARDS_DATA = [
+        { id: 'lion', icon: '🦁' }, { id: 'cat', icon: '🐈' }, { id: 'dog', icon: '🐕' }, { id: 'bird', icon: '🐦' },
+        { id: 'frog', icon: '🐸' }, { id: 'monkey', icon: '🐒' }, { id: 'panda', icon: '🐼' }, { id: 'fox', icon: '🦊' },
+      ];
+      const MEMORY_LEVEL_CONFIG = {
+        1: { pairs: 2, cols: 'grid-cols-2', label: 'Çok Kolay', cardSize: 'text-6xl', height: 'h-40' },
+        2: { pairs: 3, cols: 'grid-cols-3', label: 'Kolay', cardSize: 'text-5xl', height: 'h-36' },
+        3: { pairs: 4, cols: 'grid-cols-4', label: 'Orta', cardSize: 'text-5xl', height: 'h-32' },
+        4: { pairs: 6, cols: 'grid-cols-4', label: 'Zor', cardSize: 'text-4xl', height: 'h-28' },
+      };
+
+      const GameMemory = ({ onWin }) => {
+        const [level, setLevel] = useState(1);
+        const [cards, setCards] = useState([]);
+        const [flippedIndices, setFlippedIndices] = useState([]);
+        const [showLevelModal, setShowLevelModal] = useState(false);
+        const [gameWon, setGameWon] = useState(false);
+        const isProcessing = useRef(false);
+
+        useEffect(() => { startNewGame(); }, [level]);
+
+        const startNewGame = () => {
+          const config = MEMORY_LEVEL_CONFIG[level];
+          const availableCards = [...MEMORY_CARDS_DATA].sort(() => 0.5 - Math.random());
+          const selected = availableCards.slice(0, config.pairs);
+          const deck = [...selected, ...selected].sort(() => 0.5 - Math.random()).map((item, idx) => ({
+              uid: idx, data: item, isFlipped: false, isMatched: false
+            }));
+          setCards(deck);
+          setFlippedIndices([]);
+          setShowLevelModal(false);
+          setGameWon(false);
+          isProcessing.current = false;
+          if (level === 1) audioService.speak("Kartlara dokun ve eşini bul.");
+        };
+
+        const handleCardClick = (idx) => {
+          if (isProcessing.current || cards[idx].isFlipped || cards[idx].isMatched) return;
+          if (flippedIndices.length >= 2) return;
+          audioService.playFlip();
+          const newCards = [...cards];
+          newCards[idx].isFlipped = true;
+          setCards(newCards);
+          const newFlipped = [...flippedIndices, idx];
+          setFlippedIndices(newFlipped);
+          if (newFlipped.length === 2) {
+            isProcessing.current = true;
+            checkMatch(newFlipped[0], newFlipped[1]);
+          }
+        };
+
+        const checkMatch = (idx1, idx2) => {
+          const isMatch = cards[idx1].data.id === cards[idx2].data.id;
+          if (isMatch) {
+            setTimeout(() => {
+              audioService.playCorrect();
+              audioService.speak("Aferin!");
+              setCards(prev => prev.map((c, i) => i === idx1 || i === idx2 ? { ...c, isMatched: true } : c));
+              setFlippedIndices([]);
+              isProcessing.current = false;
+              checkWin();
+            }, 500);
+          } else {
+            setTimeout(() => {
+              setCards(prev => prev.map((c, i) => i === idx1 || i === idx2 ? { ...c, isFlipped: false } : c));
+              setFlippedIndices([]);
+              isProcessing.current = false;
+            }, 1000);
+          }
+        };
+
+        const checkWin = () => {
+          setCards(currentCards => {
+              const allMatched = currentCards.every(c => c.isMatched);
+              if (allMatched) setTimeout(() => handleLevelComplete(), 500);
+              return currentCards;
+          });
+        };
+
+        const handleLevelComplete = () => {
+            audioService.playFanfare();
+            onWin();
+            if (level < 4) {
+                audioService.speak("Tebrikler! Sıradaki seviyeye geçelim mi?");
+                setShowLevelModal(true);
+            } else {
+                audioService.speak("İnanılmaz! Bütün seviyeleri bitirdin! Şampiyonsun!");
+                setGameWon(true);
+                setShowLevelModal(true);
+            }
+        };
+
+        const nextLevel = () => {
+            if (level < 4) setLevel(prev => prev + 1);
+            else setLevel(1);
+        };
+
+        const config = MEMORY_LEVEL_CONFIG[level];
+        return (
+          <div className="w-full max-w-lg mx-auto p-2 h-full flex flex-col relative">
+            <div className="flex justify-between items-center mb-4 px-2">
+              <div className="bg-white px-4 py-2 rounded-full shadow-sm border border-indigo-100 flex items-center gap-2">
+                  <Trophy className="text-yellow-500" size={20} /><span className="font-bold text-indigo-800">Seviye {level}</span>
+              </div>
+              <div className="text-sm font-bold text-indigo-400 uppercase tracking-wider">{config.label}</div>
+            </div>
+            <div className={`grid ${config.cols} gap-3 w-full transition-all duration-500`}>
+              {cards.map((card, idx) => (
+                <button key={card.uid} onClick={() => handleCardClick(idx)} className={`${config.height} rounded-2xl border-b-[6px] flex items-center justify-center transition-all duration-300 transform ${card.isFlipped || card.isMatched ? 'bg-white border-gray-200 rotate-y-180' : 'bg-indigo-400 border-indigo-600 hover:bg-indigo-300 active:border-b-0 active:translate-y-1'} ${card.isMatched ? 'opacity-60 scale-95 ring-4 ring-green-300' : ''}`}>
+                  {(card.isFlipped || card.isMatched) ? <span className={`${config.cardSize} animate-float drop-shadow-md`}>{card.data.icon}</span> : <span className="text-indigo-200/50 text-4xl font-black">?</span>}
+                </button>
+              ))}
+            </div>
+            {showLevelModal && (
+                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center rounded-3xl">
+                    <div className="bg-white p-6 rounded-[2rem] shadow-2xl border-4 border-yellow-300 flex flex-col items-center animate-bounce-short max-w-xs w-full">
+                        <div className="text-6xl mb-4">{gameWon ? '🏆' : '🌟'}</div>
+                        <h2 className="text-2xl font-black text-indigo-900 mb-2 text-center">{gameWon ? 'ŞAMPİYON!' : 'HARİKA!'}</h2>
+                        <p className="text-indigo-600 text-center mb-6 font-medium">{gameWon ? 'Bütün kartları buldun!' : 'Diğer seviyeye geçmeye hazır mısın?'}</p>
+                        <button onClick={nextLevel} className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold text-xl shadow-lg border-b-4 border-green-700 active:border-b-0 active:translate-y-1 flex items-center justify-center gap-2 hover:bg-green-400 transition-colors">
+                            {gameWon ? <>Başa Dön <RefreshCw/></> : <>Devam Et <ArrowRight/></>}
+                        </button>
+                    </div>
+                </div>
+            )}
+          </div>
+        );
+      };
+
+      // 4. GAME STORY
+      const STORIES = [
+        { id: 'forest', title: 'Orman Macerası', coverIcon: '🌳', themeColor: 'bg-green-100', progressBarColor: 'bg-green-500', slides: [{ text: "Bir varmış bir yokmuş... Ormanda küçük bir fil yaşarmış.", icon: "🐘" }, { text: "Filin en iyi arkadaşı neşeli bir maymunmuş.", icon: "🐒" }, { text: "Bir gün, bir ağacın altında parlak bir yıldız bulmuşlar.", icon: "⭐️" }, { text: "Bu yıldız sihirliymiş! Onlara kocaman bir pasta yapmış.", icon: "🎂" }, { text: "Mutlu mutlu yiyip dans etmişler. Son.", icon: "🎶" }] },
+        { id: 'space', title: 'Uzay Yolculuğu', coverIcon: '🚀', themeColor: 'bg-indigo-900', progressBarColor: 'bg-indigo-400', slides: [{ text: "Küçük roket, gökyüzüne uçmaya hazırmış.", icon: "🚀" }, { text: "3, 2, 1... Ateş! Bulutların arasından geçmiş.", icon: "☁️" }, { text: "Uzay çok karanlıkmış ama yıldızlar pırıl pırılmış.", icon: "✨" }, { text: "Ay Dede ona gülümsemiş: 'Hoş geldin küçük roket!' demiş.", icon: "🌝" }, { text: "Roket, Dünya'ya el sallayıp evine dönmüş.", icon: "🌍" }] },
+        { id: 'sea', title: 'Deniz Altı', coverIcon: '🐠', themeColor: 'bg-cyan-100', progressBarColor: 'bg-cyan-500', slides: [{ text: "Mavi Balık, derin denizlerde yüzmeyi çok severmiş.", icon: "🐟" }, { text: "Renkli mercanların arasında saklambaç oynarmış.", icon: "🪸" }, { text: "Bir gün kırmızı bir yengeçle tanışmış.", icon: "🦀" }, { text: "Birlikte kocaman su baloncukları yapmışlar.", icon: "🫧" }, { text: "Akşam olunca yumuşak yosun yatağında uyumuşlar.", icon: "😴" }] }
+      ];
+
+      const GameStory = () => {
+        const [activeStory, setActiveStory] = useState(null);
+        const [slideIndex, setSlideIndex] = useState(0);
+        const [isPlaying, setIsPlaying] = useState(false);
+        const timerRef = useRef(null);
+
+        useEffect(() => {
+          if (!activeStory || !isPlaying) return;
+          playSlide();
+          return () => {
+              if (timerRef.current) clearTimeout(timerRef.current);
+              audioService.cancelSpeech();
+          };
+        }, [slideIndex, activeStory, isPlaying]);
+
+        const playSlide = () => {
+            if (!activeStory) return;
+            const currentText = activeStory.slides[slideIndex].text;
+            audioService.speakWithCallback(currentText, () => {
+                timerRef.current = setTimeout(() => {
+                    if (slideIndex < activeStory.slides.length - 1) setSlideIndex(prev => prev + 1);
+                    else finishStory();
+                }, 1500); 
+            });
+        };
+
+        const finishStory = () => {
+            setIsPlaying(false);
+            audioService.speak("Hikaye bitti. Harikaydı!");
+            setTimeout(() => returnToLibrary(), 2000);
+        };
+
+        const handleSelectStory = (story) => {
+          setActiveStory(story);
+          setSlideIndex(0);
+          setIsPlaying(true);
+          audioService.speak(story.title);
+        };
+
+        const returnToLibrary = () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+            audioService.cancelSpeech();
+            setIsPlaying(false);
+            setActiveStory(null);
+        };
+
+        if (!activeStory) {
+          return (
+            <div className="flex flex-col h-full w-full animate-in fade-in duration-300">
+              <div className="flex items-center gap-3 mb-6 px-2">
+                  <BookOpen className="text-orange-500" size={36} />
+                  <h2 className="text-3xl font-black text-orange-600">Hikaye Seç</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 overflow-y-auto pb-4">
+                  {STORIES.map((story) => (
+                      <button key={story.id} onClick={() => handleSelectStory(story)} className={`relative group flex flex-col items-center p-6 rounded-3xl shadow-xl transition-transform hover:scale-105 active:scale-95 border-b-8 border-black/10 ${story.id === 'space' ? 'bg-indigo-100' : story.id === 'sea' ? 'bg-cyan-100' : 'bg-green-100'}`}>
+                          <div className="text-8xl mb-4 drop-shadow-md transform group-hover:rotate-12 transition-transform duration-300">{story.coverIcon}</div>
+                          <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-xl font-bold text-xl text-gray-800 w-full text-center shadow-sm">{story.title}</div>
+                          <Star className="absolute top-4 right-4 text-yellow-400 fill-current animate-pulse" size={24} />
+                      </button>
+                  ))}
+              </div>
+            </div>
+          );
+        }
+
+        const currentSlide = activeStory.slides[slideIndex];
+        const isSpaceTheme = activeStory.id === 'space';
+        const progressPercent = ((slideIndex + 1) / activeStory.slides.length) * 100;
+
+        return (
+          <div className={`w-full h-full flex flex-col items-center justify-between p-4 md:p-8 transition-colors duration-1000 ${activeStory.themeColor} rounded-3xl border-[6px] border-white shadow-2xl relative overflow-hidden`}>
+            <div className="w-full flex justify-between z-20">
+              <button onClick={returnToLibrary} className="bg-red-500 hover:bg-red-400 text-white p-3 rounded-2xl shadow-lg border-b-4 border-red-700 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
+                  <ArrowLeft size={28} /><span className="font-bold hidden md:inline">Çıkış</span>
+              </button>
+            </div>
+            <div className="flex-1 flex flex-col items-center justify-center w-full relative z-10">
+              <span className={`text-[8rem] md:text-[12rem] drop-shadow-2xl animate-float transition-all duration-500 transform scale-100`}>{currentSlide.icon}</span>
+              <div className={`mt-8 p-6 rounded-3xl text-center max-w-lg ${isSpaceTheme ? 'bg-black/30 text-white' : 'bg-white/80 text-gray-800'} backdrop-blur-md shadow-lg border-2 border-white/20`}>
+                   <p className="text-2xl md:text-3xl font-bold leading-relaxed">{currentSlide.text}</p>
+              </div>
+            </div>
+            <div className="w-full max-w-lg mt-6 bg-white/30 h-4 rounded-full overflow-hidden shadow-inner border-2 border-white/50">
+                <div className={`h-full ${activeStory.progressBarColor} transition-all duration-1000 ease-in-out`} style={{ width: `${progressPercent}%` }} />
+            </div>
+          </div>
+        );
+      };
+
+      // 5. REWARD SCREEN
+      const GALLERY_ITEMS = [
+        { id: 'cat', name: 'Kedi', emoji: '🐱' }, { id: 'rocket', name: 'Roket', emoji: '🚀' },
+        { id: 'flower', name: 'Çiçek', emoji: '🌸' }, { id: 'butterfly', name: 'Kelebek', emoji: '🦋' }
+      ];
+      const PALETTE = [
+        { color: '#EF4444', name: 'Kırmızı' }, { color: '#F97316', name: 'Turuncu' }, { color: '#FACC15', name: 'Sarı' },
+        { color: '#22C55E', name: 'Yeşil' }, { color: '#3B82F6', name: 'Mavi' }, { color: '#A855F7', name: 'Mor' },
+        { color: '#EC4899', name: 'Pembe' }, { color: '#78350F', name: 'Kahverengi' }, { color: '#FFFFFF', name: 'Silgi' },
+      ];
+
+      const RewardScreen = () => {
+        const [selectedImageId, setSelectedImageId] = useState(null);
+        const [activeColor, setActiveColor] = useState('#EF4444');
+        const [coloringState, setColoringState] = useState({});
+
+        const handlePaint = (partId) => {
+          if (!selectedImageId) return;
+          audioService.playClick();
+          setColoringState(prev => ({ ...prev, [selectedImageId]: { ...(prev[selectedImageId] || {}), [partId]: activeColor } }));
+        };
+        const getFill = (partId) => selectedImageId ? (coloringState[selectedImageId]?.[partId] || '#ffffff') : '#ffffff';
+
+        const renderCanvas = () => {
+          const commonProps = { stroke: "#000000", strokeWidth: "5", strokeLinecap: "round", strokeLinejoin: "round", className: "transition-colors duration-200 cursor-pointer hover:opacity-90" };
+          switch (selectedImageId) {
+            case 'cat': return (<svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-xl"><path d="M40 60 L 50 10 L 90 40 Z" fill={getFill('earL')} onClick={() => handlePaint('earL')} {...commonProps} /><path d="M160 60 L 150 10 L 110 40 Z" fill={getFill('earR')} onClick={() => handlePaint('earR')} {...commonProps} /><circle cx="100" cy="110" r="70" fill={getFill('head')} onClick={() => handlePaint('head')} {...commonProps} /><circle cx="75" cy="100" r="8" fill="black" /><circle cx="125" cy="100" r="8" fill="black" /><path d="M90 120 Q 100 130 110 120" fill="none" stroke="black" strokeWidth="5" strokeLinecap="round" /><line x1="40" y1="110" x2="10" y2="100" stroke="black" strokeWidth="4" strokeLinecap="round" /><line x1="40" y1="120" x2="10" y2="130" stroke="black" strokeWidth="4" strokeLinecap="round" /><line x1="160" y1="110" x2="190" y2="100" stroke="black" strokeWidth="4" strokeLinecap="round" /><line x1="160" y1="120" x2="190" y2="130" stroke="black" strokeWidth="4" strokeLinecap="round" /></svg>);
+            case 'rocket': return (<svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-xl"><path d="M80 160 L 100 190 L 120 160 Z" fill={getFill('fire')} onClick={() => handlePaint('fire')} {...commonProps} /><path d="M50 130 L 30 160 L 70 150 Z" fill={getFill('finL')} onClick={() => handlePaint('finL')} {...commonProps} /><path d="M150 130 L 170 160 L 130 150 Z" fill={getFill('finR')} onClick={() => handlePaint('finR')} {...commonProps} /><ellipse cx="100" cy="100" rx="50" ry="80" fill={getFill('body')} onClick={() => handlePaint('body')} {...commonProps} /><circle cx="100" cy="80" r="25" fill={getFill('window')} onClick={() => handlePaint('window')} {...commonProps} /><circle cx="100" cy="80" r="20" fill="none" stroke="black" strokeWidth="3" opacity="0.2" pointerEvents="none" /></svg>);
+            case 'flower': return (<svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-xl"><path d="M100 120 L 100 200" stroke="#059669" strokeWidth="10" strokeLinecap="round" /><path d="M100 160 Q 140 140 150 160 Q 140 180 100 160" fill={getFill('leaf')} onClick={() => handlePaint('leaf')} {...commonProps} /><circle cx="100" cy="50" r="30" fill={getFill('p1')} onClick={() => handlePaint('p1')} {...commonProps} /><circle cx="145" cy="90" r="30" fill={getFill('p2')} onClick={() => handlePaint('p2')} {...commonProps} /><circle cx="100" cy="130" r="30" fill={getFill('p3')} onClick={() => handlePaint('p3')} {...commonProps} /><circle cx="55" cy="90" r="30" fill={getFill('p4')} onClick={() => handlePaint('p4')} {...commonProps} /><circle cx="100" cy="90" r="25" fill={getFill('center')} onClick={() => handlePaint('center')} {...commonProps} /><circle cx="90" cy="85" r="3" fill="black" /><circle cx="110" cy="85" r="3" fill="black" /><path d="M95 95 Q 100 100 105 95" fill="none" stroke="black" strokeWidth="3" /></svg>);
+            case 'butterfly': return (<svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-xl"><circle cx="140" cy="60" r="40" fill={getFill('wTR')} onClick={() => handlePaint('wTR')} {...commonProps} /><circle cx="60" cy="60" r="40" fill={getFill('wTL')} onClick={() => handlePaint('wTL')} {...commonProps} /><circle cx="130" cy="130" r="30" fill={getFill('wBR')} onClick={() => handlePaint('wBR')} {...commonProps} /><circle cx="70" cy="130" r="30" fill={getFill('wBL')} onClick={() => handlePaint('wBL')} {...commonProps} /><rect x="85" y="40" width="30" height="120" rx="15" fill={getFill('body')} onClick={() => handlePaint('body')} {...commonProps} /><path d="M90 45 L 70 20" fill="none" stroke="black" strokeWidth="4" strokeLinecap="round" /><path d="M110 45 L 130 20" fill="none" stroke="black" strokeWidth="4" strokeLinecap="round" /><circle cx="95" cy="60" r="3" fill="black" /><circle cx="105" cy="60" r="3" fill="black" /><path d="M95 70 Q 100 75 105 70" fill="none" stroke="black" strokeWidth="3" /></svg>);
+            default: return null;
+          }
+        };
+
+        if (!selectedImageId) {
+          return (
+            <div className="flex flex-col h-full w-full animate-in fade-in zoom-in duration-300">
+              <div className="flex items-center gap-2 mb-4"><Palette className="text-purple-500" size={32} /><h2 className="text-3xl font-black text-purple-600">Resim Galerisi</h2></div>
+              <div className="grid grid-cols-2 gap-4 pb-4">
+                {GALLERY_ITEMS.map((item) => (
+                  <button key={item.id} onClick={() => { audioService.speak(item.name); setSelectedImageId(item.id); }} className="aspect-square bg-white rounded-3xl shadow-md border-b-8 border-gray-200 active:border-b-0 active:translate-y-2 transition-all flex flex-col items-center justify-center hover:bg-purple-50 group">
+                    <span className="text-7xl group-hover:scale-110 transition-transform drop-shadow-md">{item.emoji}</span>
+                    <span className="mt-4 font-bold text-xl text-gray-600">{item.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="flex flex-col h-full w-full relative animate-in slide-in-from-right duration-300">
+            <div className="flex items-center justify-between mb-2">
+              <button onClick={() => { audioService.speak("Galeri"); setSelectedImageId(null); }} className="bg-white p-3 rounded-2xl shadow-sm border-2 border-gray-200 flex items-center gap-2 hover:bg-gray-50 active:scale-95 transition-transform">
+                <ArrowLeft size={28} className="text-gray-600" /><span className="font-bold text-gray-600 hidden md:block">Geri</span>
+              </button>
+              <h3 className="text-3xl font-black text-purple-600 tracking-wider">{GALLERY_ITEMS.find(i => i.id === selectedImageId)?.name}</h3>
+              <div className="w-12" />
+            </div>
+            <div className="flex-grow bg-white rounded-[2rem] shadow-xl border-4 border-purple-100 p-6 mb-4 flex items-center justify-center relative overflow-hidden">
+              <div className="w-full max-w-sm aspect-square">{renderCanvas()}</div>
+            </div>
+            <div className="h-24 bg-white/90 rounded-3xl shadow-lg border-2 border-gray-100 flex items-center px-4 overflow-x-auto gap-4">
+              {PALETTE.map((p) => (
+                <button key={p.color} onClick={() => { audioService.speak(p.name); setActiveColor(p.color); }} className={`w-14 h-14 rounded-full border-4 flex-shrink-0 shadow-sm transition-all flex items-center justify-center ${activeColor === p.color ? 'scale-110 border-gray-800 ring-4 ring-gray-200' : 'border-white scale-100 hover:scale-110'}`} style={{ backgroundColor: p.color }}>
+                  {activeColor === p.color && p.color !== '#FFFFFF' && <Check size={28} className="text-white/80 drop-shadow-md" />}
+                  {activeColor === p.color && p.color === '#FFFFFF' && <Check size={28} className="text-gray-400" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      };
+
+      // 6. APP ORCHESTRATOR
+      const App = () => {
+        const [currentScreen, setCurrentScreen] = useState(GameScreen.MENU);
+        const [stars, setStars] = useState(0);
+
+        const handleWin = () => setStars(stars + 2);
+
+        const renderScreen = () => {
+          switch (currentScreen) {
+            case GameScreen.MENU: return <MainMenu onNavigate={setCurrentScreen} stars={stars} />;
+            case GameScreen.GAME_CIPHER: return <GameCipher onWin={handleWin} />;
+            case GameScreen.GAME_MEMORY: return <GameMemory onWin={handleWin} />;
+            case GameScreen.GAME_STORY: return <GameStory />;
+            case GameScreen.REWARDS: return <RewardScreen />;
+            default: return <MainMenu onNavigate={setCurrentScreen} stars={stars} />;
+          }
+        };
+
+        return (
+          <div className="min-h-screen w-full bg-pink-50 text-gray-800 overflow-hidden relative font-sans">
+            <div className="absolute -top-20 -left-20 w-64 h-64 bg-blue-100 rounded-full blur-3xl opacity-60 pointer-events-none" />
+            <div className="absolute top-40 right-0 w-48 h-48 bg-yellow-100 rounded-full blur-3xl opacity-60 pointer-events-none" />
+            <div className="absolute bottom-0 left-10 w-72 h-72 bg-purple-100 rounded-full blur-3xl opacity-60 pointer-events-none" />
+            
+            {currentScreen !== GameScreen.MENU && (
+              <div className="absolute top-0 left-0 w-full p-4 z-50 flex justify-between items-center pointer-events-none">
+                <button onClick={() => { audioService.cancelSpeech(); audioService.speak("Ana menü"); setCurrentScreen(GameScreen.MENU); }} className="pointer-events-auto bg-white p-3 rounded-full shadow-lg border-2 border-gray-100 hover:scale-110 transition-transform active:bg-gray-100">
+                  <Home className="text-pink-500" size={32} />
+                </button>
+                <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border-2 border-yellow-200 shadow-sm flex items-center gap-2">
+                  <span className="text-2xl">⭐️</span>
+                  <span className="text-xl font-bold text-yellow-600">{stars}</span>
+                </div>
+              </div>
+            )}
+
+            <main className="h-[100dvh] w-full flex flex-col pt-20 pb-4 px-4 max-w-4xl mx-auto">
+              {renderScreen()}
+            </main>
+          </div>
+        );
+      };
+
+      const root = createRoot(document.getElementById('root'));
+      root.render(
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      );
+    </script>
   </body>
 </html>
